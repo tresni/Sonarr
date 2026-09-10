@@ -95,7 +95,7 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.TransmissionTests
         }
 
         [Test]
-        public async Task Download_with_category_should_force_directory()
+        public async Task Download_with_category_should_have_label()
         {
             GivenTvCategory();
             GivenSuccessfulDownload();
@@ -107,7 +107,7 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.TransmissionTests
             id.Should().NotBeNullOrEmpty();
 
             Mocker.GetMock<ITransmissionProxy>()
-                  .Verify(v => v.AddTorrentFromData(It.IsAny<byte[]>(), @"C:/Downloads/Finished/transmission/sonarr", It.IsAny<TransmissionSettings>()), Times.Once());
+                  .Verify(v => v.AddTorrentFromData(It.IsAny<byte[]>(), @"C:/Downloads/Finished/transmission/", It.IsAny<TransmissionSettings>()), Times.Once());
         }
 
         [Test]
