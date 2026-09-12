@@ -41,28 +41,34 @@ namespace NzbDrone.Core.Download.Clients.Transmission
         {
             var configFunc = new Lazy<TransmissionConfig>(() => _proxy.GetConfig(Settings));
             var torrents = _proxy.GetTorrents(null, Settings);
+            var downloadDirectory = GetDownloadDirectory();
 
             var items = new List<DownloadClientItem>();
 
             foreach (var torrent in torrents)
             {
-                /* TvCategory gets used one of two ways:
-                 * 1. As a label for the torrent on Transmission 4 or later (SupportsLabels)
-                 * 2. As a directory to put things in if Transmission 3 or earlier (!SupportsLabels)
-                 *
-                 * Because we can set _both_ TvCategory and TvDirectory, we need to evaluate them separately
-                 */
-                if (SupportsLabels && Settings.TvCategory.IsNotNullOrWhiteSpace() && !torrent.Labels.Contains(Settings.TvCategory, StringComparer.InvariantCultureIgnoreCase)) {
-                    continue;
-                }
+                var outputPath = new OsPath(torrent.DownloadDir);
 
-                // If we don't support labels and have a cateogery OR we have a download directory set, check the path
-                if ((!SupportsLabels && Settings.TvCategory.IsNotNullOrWhiteSpace()) || Settings.TvDirectory.IsNotNullOrWhiteSpace) {
-                    var outputPath = new OsPath(torrent.DownloadDir);
-                    if (!new OsPath(GetDownloadDirectory()).Contains(outputPath))
+                if (Settings.TvCategory.IsNotNullOrWhiteSpace() && SupportsLabels)
+                {
+                    // For people who are moving from Transmission 3 -> 4, torrents predating
+                    // labels are still matched by their category subfolder.
+                    if (torrent.Labels is { Count: > 0 })
+                    {
+                        if (!torrent.Labels.Contains(Settings.TvCategory, StringComparer.InvariantCultureIgnoreCase))
+                        {
+                            continue;
+                        }
+                    }
+                    else if (!outputPath.FullPath.Split('\\', '/').Contains(Settings.TvCategory))
                     {
                         continue;
                     }
+                }
+
+                if (downloadDirectory.IsNotNullOrWhiteSpace() && !new OsPath(downloadDirectory).Contains(outputPath))
+                {
+                    continue;
                 }
 
                 outputPath = _remotePathMappingService.RemapRemoteToLocal(Settings.Host, outputPath);
@@ -176,7 +182,7 @@ namespace NzbDrone.Core.Download.Clients.Transmission
 
         public override DownloadClientInfo GetStatus()
         {
-            var destDir = GetDownloadDirectory()
+            var destDir = GetDownloadDirectory() ?? _proxy.GetConfig(Settings).DownloadDir;
 
             return new DownloadClientInfo
             {
@@ -225,6 +231,11 @@ namespace NzbDrone.Core.Download.Clients.Transmission
                 return;
             }
 
+            if (!SupportsLabels && Settings.TvCategory.IsNotNullOrWhiteSpace() && Settings.TvDirectory.IsNotNullOrWhiteSpace())
+            {
+                failures.Add(new NzbDroneValidationFailure("TvCategory", "Cannot use Category and Directory"));
+            }
+
             failures.AddIfNotNull(TestGetTorrents());
         }
 
@@ -235,22 +246,17 @@ namespace NzbDrone.Core.Download.Clients.Transmission
 
         protected string GetDownloadDirectory()
         {
-            if (SupportsLabels && Settings.TvDirectory.IsNotNullOrWhiteSpace())
+            if (Settings.TvDirectory.IsNotNullOrWhiteSpace())
             {
                 return Settings.TvDirectory;
             }
-            else if(!SupportsLabels)
-            {
-                string destDir;
-                if (Settings.TvDirectory.IsNotNullOrWhiteSpace()) {
-                    destDir = Settings.TvDirectory
-                } else {
-                    var config = _proxy.GetConfig(Settings);
-                    destDir = config.DownloadDir;
-                }
 
-                return $"{destDir.TrimEnd('/')}/{Settings.TvCategory}";
+            if (SupportsLabels || Settings.TvCategory.IsNullOrWhiteSpace())
+            {
+                return null;
             }
+
+            return $"{_proxy.GetConfig(Settings).DownloadDir.TrimEnd('/')}/{Settings.TvCategory}";
         }
 
         protected ValidationFailure TestConnection()
